@@ -1,14 +1,150 @@
-# ES2pd
-This project provides a transformation method which helps transform Elasticsearch results to pandas' DataFrame structure.
-ES的聚合结果数据格式为列表嵌字典、字典套列表，数据分析时很难从中提取到待分析的字段信息，本代码使用递归方法提取需要的字段数据。
+#!/usr/bin/env python
+# -*- coding:utf-8 -*-
+
+"""
+这个代码主要是用来从es取聚合数据、转换为pandas中的Dataframe
+
+"""
+import copy
+import time
+import numpy as np
+import pandas as pd
+
+tmp = []  # 利用tmp是为了记录每一个桶的名字
+result = []  # 利用result是为了记录所有结果
 
 
-# example
-## ES数据
-          {u'status': 3, u'hits': {u'hits': [], u'total': 106316, u'max_score': 0.0},
+def dict_loop(agg_data, dest, nested):
+    """
+    遍历字典中元素
+    :param agg_data:
+    :param dest:
+    :param nested:
+    :return:
+    """
+    still_has_bucket = False
+    bucket_name = None
+    num_dest = len(dest)
+    for i in range(len(nested)):
+        if nested[i] in agg_data.keys():
+            bucket_name = nested[i]
+            still_has_bucket = True
+            break
+    if (num_dest >= 1) and (still_has_bucket is False):
+        # 提取数据, 其实可以和下面的分支合并
+        if 'key_as_string' in agg_data.keys():
+            time_local = time.localtime(agg_data['key'] / 1000)
+            key_list = [
+                time.strftime(
+                    "%Y-%m-%d %H:%M:%S",
+                    time_local)]  # 如果是按照时间分桶，取时间标识，否则提取分桶字段值
+        else:
+            key_list = [agg_data['key']]
+
+        for dest_value in dest:
+            if dest_value not in agg_data.keys():
+                key_list.append(np.nan)
+            elif dest_value == "doc_count":
+                key_list.append(agg_data[dest_value])
+            else:
+                if 'values' in agg_data[dest_value].keys():
+                    if agg_data[dest_value]['values'][0]['value'] == 'NaN':
+                        key_list.append(np.nan)
+                    else:
+                        key_list.append(
+                            agg_data[dest_value]['values'][0]['value'])
+                else:
+                    if agg_data[dest_value]['value'] == 'NaN':
+                        key_list.append(np.nan)
+                    else:
+                        key_list.append(agg_data[dest_value]['value'])
+        # 利用tmp是为了纪录每一个桶的名字
+        tmp.extend(key_list)
+        aa = copy.deepcopy(tmp)
+        result.append(aa)
+        for i in range(num_dest + 1):
+            tmp.pop()
+
+    elif (bucket_name is not None) and (isinstance(agg_data[bucket_name]['buckets'], list)) and (
+            'key' in agg_data.keys()):
+        # 调用包含时间字典的列表，其实这段代码没有用处，只要是list都要进行递归
+        tmp.extend([agg_data['key']])
+        list_loop(agg_data[bucket_name]['buckets'], dest, nested)
+        tmp.pop()
+
+    elif (bucket_name is not None) and (isinstance(agg_data[bucket_name]['buckets'], list)):
+        # 处理第一层
+        list_loop(agg_data[bucket_name]['buckets'], dest, nested)
+
+    elif bucket_name is None:
+        pass
+
+
+def list_loop(list_data, dest, nested):
+    """
+    遍历列表中元素
+    :param list_data:
+    :param dest:
+    :param nested:
+    :return:
+    """
+    for i in range(len(list_data)):
+        if isinstance(list_data[i], dict):
+            dict_loop(list_data[i], dest, nested)
+
+
+def get_list_result(agg_data, dest, nested):
+    # 获取list形式的结果
+    """
+    [[u'\u6731\u9038\u541b', u'2016-07-27T00:00:00.000+08:00', 5.0],
+    [u'\u6731\u9038\u541b', u'2016-07-28T00:00:00.000+08:00', 14.0],
+    [u'\u6731\u9038\u541b', u'2016-07-29T00:00:00.000+08:00', 79.0]]
+    """
+    dict_loop(agg_data, dest, nested)
+    result_copy = copy.deepcopy(result)
+    return result_copy
+
+
+def clear_global_variable():
+    """
+    清除中间结果
+    :return:
+    """
+    for i in range(len(result)):
+        result.pop()
+
+
+def get_es_to_pandas_data(data_all, nested, dest_list):
+    """
+    这段代码用来将es的聚合结果转换为DataFrame结构
+    :param data_all:    es搜索得到的结果
+    :param nested:      by分桶字段
+    :param dest_list:   待提取目标字段
+    :return:
+    """
+    # 获取每个job_id的搜索结果
+    if data_all.get("aggregations"):
+        agg_data = data_all['aggregations']
+    else:
+        agg_data = None
+    # 获取列表形式的结果
+    list_result = get_list_result(agg_data, dest_list, nested)
+
+    # 清空无用变量空间
+    clear_global_variable()
+
+    # 生成列名, 转换成DataFrame结构
+    nested.extend(dest_list)
+    data = pd.DataFrame(list_result, columns=nested)
+
+    return data
+
+
+if __name__ == "__main__":
+    example_data = {u'status': 3, u'hits': {u'hits': [], u'total': 106316, u'max_score': 0.0},
                     u'_shards': {u'successful': 282, u'failed': 0, u'total': 282}, u'timed_out': False, u'took': 479,
-                    u'id': u'fac9fc08-fdc1-11e8-9515-0242ac120005', u'aggregations': {u'name': {u'buckets': [
-            {u'sum_login': {u'value': 817.0}, u'time': {u'buckets': [
+                    u'id': u'fac9fc08-fdc1-11e8-9515-0242ac120005', u'aggregations': {u'3': {u'buckets': [
+            {u'sum_login': {u'value': 817.0}, u'2': {u'buckets': [
                 {u'sum_login': {u'value': 12.0}, u'key_as_string': u'2016-07-26T00:00:00.000+08:00',
                  u'key': 1469462400000, u'doc_count': 12},
                 {u'sum_login': {u'value': 5.0}, u'doc_count': 5, u'predict_2': {u'value': 12.0}, u'key': 1469548800000,
@@ -134,7 +270,7 @@ ES的聚合结果数据格式为列表嵌字典、字典套列表，数据分析
                 {u'doc_count': 0, u'predict_2': {u'value': 0.0}, u'key': 1474732800000,
                  u'key_as_string': u'2016-09-25T00:00:00.000+08:00'}]}, u'key': u'张三',
              u'doc_count': 837},
-            {u'sum_login': {u'value': 817.0}, u'time': {u'buckets': [
+            {u'sum_login': {u'value': 817.0}, u'2': {u'buckets': [
                 {u'sum_login': {u'value': 12.0}, u'key_as_string': u'2016-07-26T00:00:00.000+08:00',
                  u'key': 1469462400000, u'doc_count': 12},
                 {u'sum_login': {u'value': 5.0}, u'doc_count': 5, u'predict_2': {u'value': 12.0}, u'key': 1469548800000,
@@ -262,26 +398,7 @@ ES的聚合结果数据格式为列表嵌字典、字典套列表，数据分析
              u'doc_count': 837}, ], u'doc_count_error_upper_bound': -1,
             u'sum_other_doc_count': 97917}}}
 
-## es2pd函数参数
-
-    dest：ES的分桶聚合结果，字典格式
-    nested：嵌套分桶聚合名称，对于上面的例子，就是name、time，列表形式输入
-    dest_list：需要提取的目标字段，如sum_login、predict_2 
-
-
-## 结果数据 
-
-         name                 time  sum_login  predict_2  
-    0    张三  2016-07-26 00:00:00       12.0        NaN  
-    1    张三  2016-07-27 00:00:00        5.0       12.0  
-    2    张三  2016-07-28 00:00:00       14.0       12.0  
-    3    张三  2016-07-29 00:00:00       79.0       12.0  
-    4    张三  2016-07-30 00:00:00        0.0       12.0  
-    ..    ..                  ...        ...        ...  
-    119  李四  2016-09-21 00:00:00       39.0        0.0  
-    120  李四  2016-09-22 00:00:00       24.0       16.0  
-    121  李四  2016-09-23 00:00:00        7.0       35.0  
-    122  李四  2016-09-24 00:00:00        NaN        0.0  
-    123  李四  2016-09-25 00:00:00        NaN        0.0  
-
-    [124 rows x 4 columns]
+    dest_fields = ["sum_login", "predict_2"]
+    nested_fields = ["3", "2"]
+    res = get_es_to_pandas_data(example_data, nested_fields, dest_fields)
+    print(res)
