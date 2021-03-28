@@ -133,8 +133,8 @@ ES的聚合结果数据格式为列表嵌字典、字典套列表，数据分析
        u'key_as_string': u'2016-09-24T00:00:00.000+08:00'},
       {u'doc_count': 0, u'predict_2': {u'value': 0.0}, u'key': 1474732800000,
        u'key_as_string': u'2016-09-25T00:00:00.000+08:00'}]}, u'key': u'张三',
-   u'doc_count': 837},
-  {u'sum_login': {u'value': 817.0}, u'time': {u'buckets': [
+      u'doc_count': 837},
+      {u'sum_login': {u'value': 817.0}, u'time': {u'buckets': [
       {u'sum_login': {u'value': 12.0}, u'key_as_string': u'2016-07-26T00:00:00.000+08:00',
        u'key': 1469462400000, u'doc_count': 12},
       {u'sum_login': {u'value': 5.0}, u'doc_count': 5, u'predict_2': {u'value': 12.0}, u'key': 1469548800000,
